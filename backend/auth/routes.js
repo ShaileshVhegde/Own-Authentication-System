@@ -173,14 +173,34 @@ router.post('/google-signin',
         return res.status(400).json({ error: 'Google token required' });
       }
 
-      // Verify Google token
-      const ticket = await googleClient.verifyIdToken({
-        idToken: token,
-        audience: process.env.GOOGLE_CLIENT_ID
-      });
+      let googleId, email, name;
 
-      const payload = ticket.getPayload();
-      const { sub: googleId, email, name } = payload;
+      try {
+        // Try to verify as ID Token first
+        const ticket = await googleClient.verifyIdToken({
+          idToken: token,
+          audience: process.env.GOOGLE_CLIENT_ID
+        });
+        const payload = ticket.getPayload();
+        googleId = payload.sub;
+        email = payload.email;
+        name = payload.name;
+      } catch (idTokenError) {
+        // If ID Token verification fails, try as Access Token
+        try {
+          const axios = require('axios');
+          const userInfoResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          googleId = userInfoResponse.data.sub;
+          email = userInfoResponse.data.email;
+          name = userInfoResponse.data.name;
+        } catch (accessTokenError) {
+          console.error('Token verification failed:', idTokenError.message, accessTokenError.message);
+          throw new Error('Invalid Google token');
+        }
+      }
 
       // Check if user exists with Google ID
       let user = await User.findOne({ googleId });
